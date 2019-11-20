@@ -20,10 +20,14 @@ import time
 
 __all__ = ['Sender', 'init', 'send']
 
-__version__ = '1.4'
+__version__ = '1.6.0'
 
 default_sender = None
 logger = logging.getLogger(__name__)
+
+
+def _has_whitespace(value):
+    return not value or value.split(None, 1)[0] != value
 
 
 class Sender:
@@ -64,31 +68,39 @@ class Sender:
             self._thread.join()
             self.interval = None
 
-    def build_message(self, metric, value, timestamp):
+    def build_message(self, metric, value, timestamp, tags={}):
         """Build a Graphite message to send and return it as a byte string."""
-        if not metric or metric.split(None, 1)[0] != metric:
+        if _has_whitespace(metric):
             raise ValueError('"metric" must not have whitespace in it')
         if not isinstance(value, (int, float)):
             raise TypeError('"value" must be an int or a float, not a {}'.format(
-                    type(value).__name__))
+                type(value).__name__))
 
-        message = u'{}{} {} {}\n'.format(
+        tags_strs = [u';{}={}'.format(k, v) for k, v in sorted(tags.items())]
+        if any(_has_whitespace(t) for t in tags_strs):
+            raise ValueError('"tags" keys and values must not have whitespace in them')
+        tags_suffix = ''.join(tags_strs)
+
+        message = u'{}{}{} {} {}\n'.format(
             self.prefix + '.' if self.prefix else '',
             metric,
+            tags_suffix,
             value,
-            int(round(timestamp)),
+            int(round(timestamp))
         )
         message = message.encode('utf-8')
         return message
 
-    def send(self, metric, value, timestamp=None):
+    def send(self, metric, value, timestamp=None, tags={}):
         """Send given metric and (int or float) value to Graphite host.
         Performs send on background thread if "interval" was specified when
         creating this Sender.
+
+        If a "tags" dict is specified, send the tags to the Graphite host along with the metric.
         """
         if timestamp is None:
             timestamp = time.time()
-        message = self.build_message(metric, value, timestamp)
+        message = self.build_message(metric, value, timestamp, tags)
 
         if self.interval is None:
             self.send_socket(message)
